@@ -1,48 +1,58 @@
 import requests
 from bs4 import BeautifulSoup
 
-# Метод для парсинга первой страницы и остальных
-def parse_url(url, page_num, title_price):
-    response_catalog = ""
-    if "?PAGEN_1=" in url:
-        response_catalog = requests.get(f'https://ekb.hi-stores.ru/catalog/smartphones/?PAGEN_1={page_num}')
-    else:
-        response_catalog = requests.get(f'https://ekb.hi-stores.ru/catalog/smartphones/')
 
-    soup_catalog = BeautifulSoup(response_catalog.content, "lxml")
-    catalog = soup_catalog.find("div", class_="top_wrapper items_wrapper catalog_block_template")
-    elements_catalog = catalog.find_all(attrs={'data-id': True}) # Получение id всех товаров
+def parse_url(page_num, title_price):
+    url_to_fetch = f'https://ekb.hi-stores.ru/catalog/smartphones/'
+    if page_num > 1:
+        url_to_fetch += f'?PAGEN_1={page_num}'
 
-    id_set = set() # Для устранения дубликатов id при парсинге
-    for product_id in elements_catalog:
-        data_id = product_id['data-id']
-        id_set.add(data_id)
-    id_list = list(id_set) # Для более быстрой итерации
+    try:
+        response_catalog = requests.get(url_to_fetch)
+        response_catalog.raise_for_status()
+        soup_catalog = BeautifulSoup(response_catalog.content, "lxml")
+        catalog = soup_catalog.find("div", class_="top_wrapper items_wrapper catalog_block_template")
 
-    for product in id_list:
-        product_page = catalog.find(attrs={'data-id': product})
-        product_title = product_page.find("a", class_="dark_link js-notice-block__title option-font-bold font_sm")
-        product_price = product_page.find("span", class_="price_value")
-        title_price[product_title.get_text()] = product_price.get_text()
+        if catalog is None:
+            print(f"Warning: 'catalog' element not found on page {page_num}. Skipping...")
+            return title_price
 
-    id_set.clear()
+        elements_catalog = catalog.find_all(attrs={'data-id': True})
+
+        for product_id_element in elements_catalog:
+            product_id = product_id_element['data-id']
+            product_page = catalog.find(attrs={'data-id': product_id})
+
+            if product_page:
+                product_title = product_page.find("a", class_="dark_link js-notice-block__title option-font-bold font_sm")
+                product_price = product_page.find("span", class_="price_value")
+
+                if product_title and product_price:
+                    title_price[product_title.get_text(strip=True)] = product_price.get_text(strip=True)
+                else:
+                    continue
+            else:
+                continue
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching page {page_num}: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred on page {page_num}: {e}")
+
 
     return title_price
 
-# Получение контента для пагинации
-response_main = requests.get('https://ekb.hi-stores.ru/catalog/smartphones/')
-soup_main = BeautifulSoup(response_main.content, "lxml")
-title_price = {}
 
-parse_url(url="https://ekb.hi-stores.ru/catalog/smartphones/", page_num=0, title_price=title_price)
-
-# Нахождение последней страницы, для прохода по всем кроме первой
-nums_div = soup_main.find("div", class_="nums")
-nums = nums_div.find_all("a", class_="dark_link")
-last_page = nums[len(nums) - 1].text
-
-# Проход по всем страницам
-for i in range(2, int(last_page) + 1):
-    parse_url(url="https://ekb.hi-stores.ru/catalog/smartphones/?PAGEN_1=", page_num=i, title_price=title_price)
-
-print(title_price)
+def get_prices():
+    response_main = requests.get('https://ekb.hi-stores.ru/catalog/smartphones/')
+    soup_main = BeautifulSoup(response_main.content, "lxml")
+    title_price = {}
+    nums_div = soup_main.find("div", class_="nums")
+    if nums_div:
+        nums = nums_div.find_all("a", class_="dark_link")
+        last_page = nums[-1].text if nums else 1
+    else:
+        last_page = 1
+    for i in range(1, int(last_page) + 1):
+        title_price = parse_url(page_num=i, title_price=title_price)
+    return title_price
