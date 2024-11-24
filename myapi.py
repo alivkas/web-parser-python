@@ -31,10 +31,6 @@ def get_session():
 SessionDep = Depends(get_session)
 
 
-class Item(BaseModel):
-    ...
-
-
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
 
@@ -52,14 +48,34 @@ async def background_parser_async():
         products = await run_in_threadpool(get_prices)
         with Session(engine) as session:
             for title, price in products.items():
-                print(f"{title} - {price}")
-                add_item(title, price, session)
+                try:
+                    existing_item = session.query(Prices).filter(Prices.name == title).first()
+                    if existing_item:
+                        existing_item.price = price
+                        print(f"Updated: {title} - {price}")
+                        session.commit()
+                    else:
+                        add_item(title, price, session)
+                        print(f"Added: {title} - {price}")
+                except ValueError:
+                    print(f"Ошибка преобразования цены для товара: {title}")
         await asyncio.sleep(12 * 60 * 60)
 
 
 def background_add_item():
-    data = get_prices()
-    add_item(*data)
+    with Session(engine) as session:
+        for title, price in get_prices().items():
+            try:
+                existing_item = session.query(Prices).filter(Prices.name == title).first()
+                if existing_item:
+                    existing_item.price = price
+                    print(f"Updated: {title} - {price}")
+                    session.commit()
+                else:
+                    add_item(title, price, session)
+                    print(f"Added: {title} - {price}")
+            except ValueError:
+                print(f"Ошибка преобразования цены для товара: {title}")
 
 
 @app.on_event("startup")
@@ -70,9 +86,8 @@ async def startup_event():
 
 @app.get("/start_parser")
 async def start_parser(background_tasks: BackgroundTasks):
-    #  asyncio.create_task(background_add_item())
     background_tasks.add_task(background_add_item)
-    return {}
+    return "Данные обновлены"
 
 
 @app.get("/prices")
@@ -80,9 +95,9 @@ async def read_prices(session: Session = SessionDep, offset: int = 0, limit: int
     return session.execute(select(Prices).offset(offset).limit(limit)).scalars().all()
 
 
-@app.get("/prices/{item_id}")
-async def read_item(item_id: int, session: Session = SessionDep):
-    price = session.get(Prices, item_id)
+@app.get("/prices/{price_id}")
+async def read_item(price_id: int, session: Session = SessionDep):
+    price = session.get(Prices, price_id)
     if not price:
         raise HTTPException(status_code=404, detail="Price not found")
     return price
@@ -99,14 +114,6 @@ async def update_item(item_id: int, data: Prices, session: Session = SessionDep)
     session.commit()
     session.refresh(price_db)
     return price_db
-
-
-@app.post("/prices/create")
-async def create_item(item: Prices, session: Session = SessionDep):
-    session.add(item)
-    session.commit()
-    session.refresh(item)
-    return item
 
 
 @app.delete("/prices/{item_id}")
