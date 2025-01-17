@@ -1,21 +1,16 @@
 import asyncio
 
 from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException
-from typing import Dict
+from sqlmodel import SQLModel, create_engine, Session, select
 from parser import get_prices
-from starlette.concurrency import run_in_threadpool
-from sqlmodel import Field, SQLModel, create_engine, Session, select
-from sqlalchemy.orm import Session
 from starlette.websockets import WebSocket
+from typing import Dict
+from starlette.concurrency import run_in_threadpool
+from sqlalchemy.orm import Session
+from models import Prices, PriceCreate
+
 
 app = FastAPI()
-
-
-class Prices(SQLModel, table=True):
-    id: int = Field(primary_key=True)
-    name: str
-    cost: int
-
 
 sqlite_url = "sqlite:///parser.db"
 engine = create_engine(sqlite_url)
@@ -27,10 +22,6 @@ def get_session():
 
 
 SessionDep = Depends(get_session)
-
-
-def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
 
 
 def add_item(title, price, session: Session):
@@ -76,10 +67,30 @@ def background_add_item():
                 print(f"Ошибка преобразования цены для товара: {title}")
 
 
+def create_db_and_tables():
+    SQLModel.metadata.create_all(engine)
+
+
 @app.on_event("startup")
 async def startup_event():
     create_db_and_tables()
     asyncio.create_task(background_parser_async())
+
+
+@app.post("/prices", response_model=Prices)
+async def create_price(price: PriceCreate, session: Session = SessionDep):
+    existing_item = session.query(Prices).filter(Prices.name == price.name).first()
+    if existing_item:
+        raise HTTPException(status_code=400, detail="Item already exists")
+
+    new_price = Prices(name=price.name, cost=price.cost)
+    session.add(new_price)
+    session.commit()
+    session.refresh(new_price)
+
+    await broadcast("create_item", {"id": new_price.id, "name": new_price.name, "price": new_price.cost})
+
+    return new_price
 
 
 @app.get("/start_parser")

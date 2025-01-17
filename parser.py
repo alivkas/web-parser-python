@@ -25,7 +25,7 @@ def parse_url(page_num, title_price):
 
             if product_page:
                 product_title = product_page.find("a", class_="dark_link js-notice-block__title option-font-bold font_sm")
-                product_price = product_page.find("span", class_="price_value")
+                product_price = product_page.find("span", class_="values_wrapper")
 
                 if product_title and product_price:
                     title_price[product_title.get_text(strip=True)] = product_price.get_text(strip=True)
