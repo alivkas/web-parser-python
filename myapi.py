@@ -51,9 +51,11 @@ async def background_parser_async():
         await asyncio.sleep(12 * 60 * 60)
 
 
-def background_add_item():
+async def background_add_item():
+    print("Starting get price")
+    products = await run_in_threadpool(get_prices)
     with Session(engine) as session:
-        for title, price in get_prices().items():
+        for title, price in products.items():
             try:
                 existing_item = session.query(Prices).filter(Prices.name == title).first()
                 if existing_item:
@@ -100,7 +102,7 @@ async def start_parser(background_tasks: BackgroundTasks):
 
 
 @app.get("/prices")
-async def read_prices(session: Session = SessionDep, offset: int = 0, limit: int = 1000):
+async def read_items(session: Session = SessionDep, offset: int = 0, limit: int = 1000):
     await broadcast("read_items", {"message":"prices read"})
     return session.execute(select(Prices).offset(offset).limit(limit)).scalars().all()
 
